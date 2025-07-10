@@ -28,28 +28,24 @@ class GetMessages(ctk.CTk):
         self.save_messages_in_file = ctk.BooleanVar(value=False)
 
         self.init_main_menu()
-    
+
     def clear_window(self) -> None:
         for widget in self.winfo_children():
             widget.destroy()
-    
+
     def init_main_menu(self) -> None:
         def on_confirm() -> None:
             selected_mode: str = self.selected_mode.get()
             selected_channel: str = self.selected_channel.get()
 
             if selected_mode == "Select mode":
-                showerror("Error", "Mode not selected!")
+                self.console_print("Mode not selected!", is_error=True)
                 return
 
             if selected_channel == "Select channel":
-                showerror("Error", "Channel not selected!")
+                self.console_print("Channel not selected!", is_error=True)
                 stop()
                 return
-
-            self.console.configure(state=ctk.NORMAL)
-            self.console.delete("1.0", ctk.END)
-            self.console.configure(state=ctk.DISABLED)
 
             if selected_mode == "All messages":
                 self.loading_bar.configure(mode="indeterminate")
@@ -59,12 +55,12 @@ class GetMessages(ctk.CTk):
                 try:
                     messages_count: int = int(self.messages_count.get())
                     if messages_count <= 0:
-                        showerror("Error", "Invalid messages count!")
+                        self.console_print("Invalid messages count!", is_error=True)
                         return
 
                     threading.Thread(target=self.get_messages, kwargs={"max_messages": messages_count}).start()
                 except ValueError:
-                    showerror("Error", "Invalid messages count!")
+                    self.console_print("Invalid messages count!", is_error=True)
             elif selected_mode == "From last stream":
                 last_stream: tuple = self.get_last_stream()
                 if last_stream is not None:
@@ -73,11 +69,6 @@ class GetMessages(ctk.CTk):
         def stop() -> None:
             if self.in_process_flag:
                 self.stop_flag = True
-
-        def clear() -> None:
-            self.console.configure(state=ctk.NORMAL)
-            self.console.delete("1.0", ctk.END)
-            self.console.configure(state=ctk.DISABLED)
 
         self.clear_window()
 
@@ -132,6 +123,7 @@ class GetMessages(ctk.CTk):
         self.loading_bar.pack(fill=ctk.X, side=ctk.TOP, pady=(0, 10))
 
         self.console = ctk.CTkTextbox(console_frame, state=ctk.DISABLED)
+        self.console.tag_config("error", foreground="#bf2a2f")
         self.console.pack(fill=ctk.BOTH, expand=True, side=ctk.BOTTOM)
 
         console_buttons_frame = ctk.CTkFrame(right_side, height=40)
@@ -141,23 +133,33 @@ class GetMessages(ctk.CTk):
         ctk.CTkButton(console_buttons_frame, text="Stop", font=("times new roman", 16, "bold"),
                       width=50, command=stop).pack(side=ctk.LEFT, padx=5)
         ctk.CTkButton(console_buttons_frame, text="Clear", font=("times new roman", 16, "bold"),
-                      width=50, command=clear).pack(side=ctk.LEFT, padx=5)
+                      width=50, command=self.clear_console).pack(side=ctk.LEFT, padx=5)
 
-    def console_print(self, text: str) -> None:
+    def console_print(self, text: str, is_error: bool = False) -> None:
         self.console.configure(state=ctk.NORMAL)
-        self.console.insert("1.0", text)
+
+        if is_error:
+            self.console.insert("1.0", text + "\n", "error")
+        else:
+            self.console.insert("1.0", text + "\n")
+
+        self.console.configure(state=ctk.DISABLED)
+
+    def clear_console(self) -> None:
+        self.console.configure(state=ctk.NORMAL)
+        self.console.delete("1.0", ctk.END)
         self.console.configure(state=ctk.DISABLED)
 
     def open_auth_data_window(self) -> None:
         def parse() -> None:
             if self.parse_auth_data(user_data_entry.get("1.0", ctk.END)):
-                showinfo("Success", "Auth data parsed successfully!")
+                showinfo("Info", "Auth data parsed successfully!")
                 self.init_main_menu()
 
         def show_explaining() -> None:
-            showinfo("Explaining", "You need to go to Twitch, press F12 -> Network, then find the gql "
-                                   "request there, right-click -> copy -> Copy as cURL (bash), and then paste this "
-                                   "text into the text field.")
+            showinfo("Info", "You need to go to Twitch, press F12 -> Network, then find the gql "
+                             "request there, right-click -> copy -> Copy as cURL (bash), and then paste this "
+                             "text into the text field.")
 
         def paste_text(_=None):
             user_data_entry.insert(ctk.INSERT, self.clipboard_get())
@@ -214,7 +216,7 @@ class GetMessages(ctk.CTk):
 
             return True
         else:
-            showerror("Error", "Empty curl text!")
+            showerror("Error", "Curl text is empty!")
             return False
 
     def do_request(self, sha256hash: str, operation_name: str, variables: dict) -> dict | None:
@@ -234,7 +236,7 @@ class GetMessages(ctk.CTk):
             headers: dict = data["user_data"]
 
             if headers == {}:
-                showerror("Error", "Auth data not found!")
+                self.console_print("Auth data not found!", is_error=True)
                 return None
 
             response: rq.Response = rq.post("https://gql.twitch.tv/gql", headers=headers, json=payload)
@@ -242,12 +244,12 @@ class GetMessages(ctk.CTk):
             json_: dict = response.json()
 
             if "error" in json_ or ("errors" in json_ and json_["errors"][0]["message"] == "failed integrity check"):
-                showerror("Error", "Failed integrity check! Auth data is probably out of date.")
+                self.console_print("Failed integrity check! Auth data is probably out of date.", is_error=True)
                 return None
 
             return json_
         except Exception as e:
-            showerror("Error", f"An error occurred: {type(e)} ({str(e)})")
+            self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
             return None
 
     def get_last_stream(self) -> str | None:
@@ -271,7 +273,7 @@ class GetMessages(ctk.CTk):
             stream_length: int = node["lengthSeconds"]
             return last_stream_date, stream_length
         except Exception as e:
-            showerror("Error", f"An error occurred: {type(e)} ({str(e)})")
+            self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
             return None
 
     def get_messages(self, cursor: str = "", messages_count: int = 0, max_messages: int = 0,
@@ -352,10 +354,10 @@ class GetMessages(ctk.CTk):
                 sender: str = node["sender"]
                 message: str = node["content"]["text"]
 
-                output_message: str = stream_timecode + f"({redacted_date}) {sender['displayName']}: {message}\n"
+                output_message: str = stream_timecode + f"({redacted_date}) {sender['displayName']}: {message}"
 
                 self.console_print(output_message)
-                all_messages.append(output_message)
+                all_messages.append(output_message + "\n")
 
                 messages_count += 1
 
@@ -371,7 +373,7 @@ class GetMessages(ctk.CTk):
             else:
                 stop(with_save=True)
         except Exception as e:
-            showerror("Error", f"An error occurred: {type(e)} ({str(e)})")
+            self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
             stop()
             return
 
@@ -389,11 +391,14 @@ class GetMessages(ctk.CTk):
 
     @staticmethod
     def save_messages_to_file(messages: list) -> None:
+        if not os.path.exists("messages") or not os.path.isdir("messages"):
+            os.mkdir("messages")
+
         i: int = 0
 
         while True:
-            if not os.path.exists(f"messages{i if i != 0 else ""}.txt"):
-                with open(f"messages{i if i != 0 else ""}.txt", "w", encoding="UTF-8") as file:
+            if not os.path.exists(f"messages/messages{i if i != 0 else ""}.txt"):
+                with open(f"messages/messages{i if i != 0 else ""}.txt", "w", encoding="UTF-8") as file:
                     file.writelines(reversed(messages))
 
                 return
