@@ -23,7 +23,8 @@ class GetMessages(ctk.CTk):
 
         self.selected_channel = ctk.StringVar(value="Select channel")
         self.selected_mode = ctk.StringVar(value="Select mode")
-        self.messages_count = ctk.StringVar(value="")
+        self.messages_count = ctk.StringVar(value="Messages count")
+        self.streams_ago = ctk.StringVar(value="... streams ago")
         self.with_timecodes = ctk.BooleanVar(value=False)
         self.save_messages_in_file = ctk.BooleanVar(value=False)
 
@@ -61,10 +62,13 @@ class GetMessages(ctk.CTk):
                     threading.Thread(target=self.get_messages, kwargs={"max_messages": messages_count}).start()
                 except ValueError:
                     self.console_print("Invalid messages count!", is_error=True)
-            elif selected_mode == "From last stream":
-                last_stream: tuple = self.get_last_stream()
-                if last_stream is not None:
-                    threading.Thread(target=self.get_messages, kwargs={"last_stream": last_stream}).start()
+            elif selected_mode == "From ... stream ago":
+                try:
+                    last_stream: tuple = self.get_stream_ago(int(self.streams_ago.get()))
+                    if last_stream is not None:
+                        threading.Thread(target=self.get_messages, kwargs={"last_stream": last_stream}).start()
+                except ValueError:
+                    self.console_print("Invalid streams ago!", is_error=True)
 
         def stop() -> None:
             if self.in_process_flag:
@@ -89,13 +93,13 @@ class GetMessages(ctk.CTk):
                                            variable=self.selected_channel)
         select_channel.pack(pady=(10, 0))
 
-        select_mode = ctk.CTkOptionMenu(left_side, values=["All messages", "Last ... messages", "From last stream"],
+        select_mode = ctk.CTkOptionMenu(left_side, values=["All messages", "Last ... messages", "From ... stream ago"],
                                         variable=self.selected_mode)
         select_mode.pack(pady=(10, 0))
 
-        messages_count_entry = ctk.CTkEntry(left_side, placeholder_text="Messages count",
-                                            textvariable=self.messages_count)
-        messages_count_entry.pack(pady=(10, 0))
+        ctk.CTkEntry(left_side, textvariable=self.messages_count).pack(pady=(10, 0))
+
+        ctk.CTkEntry(left_side, textvariable=self.streams_ago).pack(pady=(10, 0))
 
         ctk.CTkCheckBox(left_side, text="Save messages\nto file",
                         variable=self.save_messages_in_file).pack(pady=(10, 0), anchor=ctk.W, padx=5)
@@ -144,6 +148,7 @@ class GetMessages(ctk.CTk):
             self.console.insert("1.0", text + "\n")
 
         self.console.configure(state=ctk.DISABLED)
+        self.console.see("1.0")
 
     def clear_console(self) -> None:
         self.console.configure(state=ctk.NORMAL)
@@ -252,13 +257,13 @@ class GetMessages(ctk.CTk):
             self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
             return None
 
-    def get_last_stream(self) -> str | None:
+    def get_stream_ago(self, stream_ago: int) -> str | None:
         sha256hash: str = "acea7539a293dfd30f0b0b81a263134bb5d9a7175592e14ac3f7c77b192de416"
         operation_name: str = "FilterableVideoTower_Videos"
         variables: dict = {
             "broadcastType": "ARCHIVE",
             "channelOwnerLogin": self.selected_channel.get(),
-            "limit": 1,
+            "limit": stream_ago,
             "videoSort": "TIME"
         }
 
@@ -268,7 +273,7 @@ class GetMessages(ctk.CTk):
             return None
 
         try:
-            node: dict = response["data"]["user"]["videos"]["edges"][0]["node"]
+            node: dict = response["data"]["user"]["videos"]["edges"][-1]["node"]
             last_stream_date: str = node["publishedAt"]
             stream_length: int = node["lengthSeconds"]
             return last_stream_date, stream_length
