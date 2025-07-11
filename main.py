@@ -277,7 +277,7 @@ class GetMessages(ctk.CTk):
             return None
 
     def get_messages(self, cursor: str = "", messages_count: int = 0, max_messages: int = 0,
-                     last_stream: tuple | None = None) -> None:
+                     last_stream: tuple | None = None, all_messages: list | None = None) -> None:
         def stop(with_save: bool = False) -> None:
             if max_messages == 0:
                 self.loading_bar.stop()
@@ -292,6 +292,9 @@ class GetMessages(ctk.CTk):
 
             self.in_process_flag = False
             self.stop_flag = False
+
+        if all_messages is None:
+            all_messages = []
 
         self.in_process_flag = True
         self.confirm_button.configure(state=ctk.DISABLED)
@@ -312,8 +315,6 @@ class GetMessages(ctk.CTk):
         if response is None:
             stop()
             return
-
-        all_messages: list = []
 
         try:
             messages: dict = response["data"]["logs"]["messages"]
@@ -369,7 +370,7 @@ class GetMessages(ctk.CTk):
                     return
 
             if messages["pageInfo"]["hasNextPage"]:
-                self.get_messages(edges[-1]["cursor"], messages_count, max_messages, last_stream)
+                self.get_messages(edges[-1]["cursor"], messages_count, max_messages, last_stream, all_messages)
             else:
                 stop(with_save=True)
         except Exception as e:
