@@ -6,14 +6,13 @@ import customtkinter as ctk
 import requests as rq
 from datetime import datetime, timedelta
 from tkinter.messagebox import showerror, showinfo
+from CTkListbox import CTkListbox
 from typing import Callable
 
 
 class GetMessages(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-
-        self.geometry("700x400")
 
         self.console: ctk.CTkTextbox | None = None
         self.confirm_button: ctk.CTkButton | None = None
@@ -23,7 +22,8 @@ class GetMessages(ctk.CTk):
 
         self.selected_channel = ctk.StringVar(value="Select channel")
         self.selected_mode = ctk.StringVar(value="Select mode")
-        self.messages_count = ctk.StringVar(value="")
+        self.messages_count = ctk.StringVar(value="Messages count")
+        self.streams_ago = ctk.StringVar(value="... streams ago")
         self.with_timecodes = ctk.BooleanVar(value=False)
         self.save_messages_in_file = ctk.BooleanVar(value=False)
 
@@ -61,10 +61,13 @@ class GetMessages(ctk.CTk):
                     threading.Thread(target=self.get_messages, kwargs={"max_messages": messages_count}).start()
                 except ValueError:
                     self.console_print("Invalid messages count!", is_error=True)
-            elif selected_mode == "From last stream":
-                last_stream: tuple = self.get_last_stream()
-                if last_stream is not None:
-                    threading.Thread(target=self.get_messages, kwargs={"last_stream": last_stream}).start()
+            elif selected_mode == "From ... stream ago":
+                try:
+                    last_stream: tuple = self.get_stream_ago(int(self.streams_ago.get()))
+                    if last_stream is not None:
+                        threading.Thread(target=self.get_messages, kwargs={"last_stream": last_stream}).start()
+                except ValueError:
+                    self.console_print("Invalid streams ago!", is_error=True)
 
         def stop() -> None:
             if self.in_process_flag:
@@ -73,6 +76,7 @@ class GetMessages(ctk.CTk):
         self.clear_window()
 
         self.title("Get Messages History")
+        self.geometry("700x400")
         self.minsize(700, 400)
 
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -89,13 +93,13 @@ class GetMessages(ctk.CTk):
                                            variable=self.selected_channel)
         select_channel.pack(pady=(10, 0))
 
-        select_mode = ctk.CTkOptionMenu(left_side, values=["All messages", "Last ... messages", "From last stream"],
+        select_mode = ctk.CTkOptionMenu(left_side, values=["All messages", "Last ... messages", "From ... stream ago"],
                                         variable=self.selected_mode)
         select_mode.pack(pady=(10, 0))
 
-        messages_count_entry = ctk.CTkEntry(left_side, placeholder_text="Messages count",
-                                            textvariable=self.messages_count)
-        messages_count_entry.pack(pady=(10, 0))
+        ctk.CTkEntry(left_side, textvariable=self.messages_count).pack(pady=(10, 0))
+
+        ctk.CTkEntry(left_side, textvariable=self.streams_ago).pack(pady=(10, 0))
 
         ctk.CTkCheckBox(left_side, text="Save messages\nto file",
                         variable=self.save_messages_in_file).pack(pady=(10, 0), anchor=ctk.W, padx=5)
@@ -107,8 +111,7 @@ class GetMessages(ctk.CTk):
                                             hover_color="#242424", command=on_confirm)
         self.confirm_button.pack(pady=10, side=ctk.BOTTOM)
 
-        ctk.CTkButton(left_side, text="Enter auth data",
-                      command=self.open_auth_data_window).pack(pady=10, side=ctk.BOTTOM)
+        ctk.CTkButton(left_side, text="Settings", command=self.init_settings_menu).pack(pady=10, side=ctk.BOTTOM)
 
         right_side = ctk.CTkFrame(main_frame, width=300, fg_color="transparent")
         right_side.pack_propagate(False)
@@ -144,13 +147,75 @@ class GetMessages(ctk.CTk):
             self.console.insert("1.0", text + "\n")
 
         self.console.configure(state=ctk.DISABLED)
+        self.console.see("1.0")
 
     def clear_console(self) -> None:
         self.console.configure(state=ctk.NORMAL)
         self.console.delete("1.0", ctk.END)
         self.console.configure(state=ctk.DISABLED)
 
-    def open_auth_data_window(self) -> None:
+    def init_settings_menu(self) -> None:
+        self.clear_window()
+
+        self.title("Get Messages History - Settings")
+        self.minsize(300, 150)
+
+        ctk.CTkButton(self, text="Back", command=self.init_main_menu, width=40).pack(pady=10, anchor=ctk.W, padx=10)
+
+        frame = ctk.CTkFrame(self, fg_color="transparent")
+        frame.pack_propagate(False)
+        frame.pack(fill=ctk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+        settings_frame = ctk.CTkFrame(frame, height=95)
+        settings_frame.pack_propagate(False)
+        settings_frame.place(relx=0.5, rely=0.5, anchor=ctk.CENTER)
+
+        ctk.CTkButton(settings_frame, text="Manage channels",
+                      command=self.init_manage_channels_menu).pack(pady=(15, 0), anchor=ctk.CENTER)
+
+        ctk.CTkButton(settings_frame, text="Enter auth data",
+                      command=self.init_auth_data_menu).pack(pady=(10, 15), anchor=ctk.CENTER)
+
+    def init_manage_channels_menu(self) -> None:
+        def add_channel() -> None:
+            channel_name: str = ctk.windows.CTkInputDialog(text="Enter channel name", title="Add channel").get_input()
+            print(channel_name)
+            ...
+
+        def delete_channel() -> None:
+            ...
+
+        self.clear_window()
+
+        self.title("Get Messages History - Manage channels")
+        self.minsize(400, 345)
+
+        ctk.CTkButton(self, text="Back", command=self.init_settings_menu, width=40).pack(pady=(10, 0), anchor=ctk.W,
+                                                                                         padx=10)
+
+        main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        main_frame.pack_propagate(False)
+        main_frame.pack(fill=ctk.BOTH, expand=True, padx=10, pady=10)
+
+        left_side = ctk.CTkFrame(main_frame, width=150)
+        left_side.pack_propagate(False)
+        left_side.pack(side=ctk.LEFT, fill=ctk.Y, padx=(0, 10))
+
+        buttons_frame = ctk.CTkFrame(left_side, height=95, fg_color="transparent")
+        buttons_frame.pack_propagate(False)
+        buttons_frame.place(relx=0.5, rely=0.5, anchor=ctk.CENTER)
+
+        ctk.CTkButton(buttons_frame, text="Add", width=105, command=add_channel).pack(pady=(15, 0), anchor=ctk.CENTER)
+        ctk.CTkButton(buttons_frame, text="Remove", width=105, command=delete_channel).pack(pady=(10, 0),
+                                                                                            anchor=ctk.CENTER)
+
+        channels_list = CTkListbox(main_frame, border_width=2)
+        channels_list.pack(padx=10, fill=ctk.BOTH, expand=True, side=ctk.RIGHT)
+
+        for channel in self.get_data()["channels"].keys():
+            channels_list.insert(ctk.END, channel)
+
+    def init_auth_data_menu(self) -> None:
         def parse() -> None:
             if self.parse_auth_data(user_data_entry.get("1.0", ctk.END)):
                 showinfo("Info", "Auth data parsed successfully!")
@@ -170,20 +235,22 @@ class GetMessages(ctk.CTk):
         self.title("Get Messages History - Parse auth data")
         self.minsize(400, 345)
 
-        ctk.CTkButton(self, text="?", font=("Arial", 17, "bold"), width=30,
-                      command=show_explaining).pack(anchor=ctk.W, padx=10, pady=10)
+        upper_frame = ctk.CTkFrame(self, height=29, fg_color="transparent")
+        upper_frame.pack_propagate(False)
+        upper_frame.pack(fill=ctk.X, pady=10, padx=10)
+
+        ctk.CTkButton(upper_frame, text="Back", command=self.init_settings_menu,
+                      width=40).pack(side=ctk.LEFT)
+
+        ctk.CTkButton(upper_frame, text="?", font=("Arial", 17, "bold"), width=30,
+                      command=show_explaining).pack(side=ctk.RIGHT)
 
         user_data_entry = ctk.CTkTextbox(self)
         user_data_entry.pack(padx=10, fill=ctk.BOTH, expand=True)
 
         user_data_entry.bind("<Control-v>", paste_text)
 
-        bottom_frame = ctk.CTkFrame(self, height=45)
-        bottom_frame.pack_propagate(False)
-        bottom_frame.pack(fill=ctk.X, pady=10, padx=10)
-
-        ctk.CTkButton(bottom_frame, text="Parse", command=parse).pack(padx=5, pady=5, side=ctk.LEFT)
-        ctk.CTkButton(bottom_frame, text="Cancel", command=self.init_main_menu).pack(padx=5, pady=5, side=ctk.RIGHT)
+        ctk.CTkButton(self, text="Parse", command=parse).pack(padx=10, pady=10)
 
     def parse_auth_data(self, curl_text: str) -> bool:
         if curl_text != "\n":
@@ -252,13 +319,13 @@ class GetMessages(ctk.CTk):
             self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
             return None
 
-    def get_last_stream(self) -> str | None:
+    def get_stream_ago(self, stream_ago: int) -> str | None:
         sha256hash: str = "acea7539a293dfd30f0b0b81a263134bb5d9a7175592e14ac3f7c77b192de416"
         operation_name: str = "FilterableVideoTower_Videos"
         variables: dict = {
             "broadcastType": "ARCHIVE",
             "channelOwnerLogin": self.selected_channel.get(),
-            "limit": 1,
+            "limit": stream_ago,
             "videoSort": "TIME"
         }
 
@@ -268,7 +335,7 @@ class GetMessages(ctk.CTk):
             return None
 
         try:
-            node: dict = response["data"]["user"]["videos"]["edges"][0]["node"]
+            node: dict = response["data"]["user"]["videos"]["edges"][-1]["node"]
             last_stream_date: str = node["publishedAt"]
             stream_length: int = node["lengthSeconds"]
             return last_stream_date, stream_length
