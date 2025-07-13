@@ -37,13 +37,20 @@ class GetMessages(ctk.CTk):
         def on_confirm() -> None:
             selected_mode: str = self.selected_mode.get()
             selected_channel: str = self.selected_channel.get()
+            data: dict = self.get_data()
 
             if selected_mode == "Select mode":
                 self.console_print("Mode not selected!", is_error=True)
+                stop()
                 return
 
             if selected_channel == "Select channel":
                 self.console_print("Channel not selected!", is_error=True)
+                stop()
+                return
+
+            if data["user_id"] is None:
+                self.console_print("User id not found!", is_error=True)
                 stop()
                 return
 
@@ -139,15 +146,21 @@ class GetMessages(ctk.CTk):
                       width=50, command=self.clear_console).pack(side=ctk.LEFT, padx=5)
 
     def console_print(self, text: str, is_error: bool = False) -> None:
-        self.console.configure(state=ctk.NORMAL)
+        if self.console.winfo_exists():
+            self.console.configure(state=ctk.NORMAL)
 
-        if is_error:
-            self.console.insert("1.0", text + "\n", "error")
+            if is_error:
+                self.console.insert("1.0", text + "\n", "error")
+            else:
+                self.console.insert("1.0", text + "\n")
+
+            self.console.configure(state=ctk.DISABLED)
+            self.console.see("1.0")
         else:
-            self.console.insert("1.0", text + "\n")
-
-        self.console.configure(state=ctk.DISABLED)
-        self.console.see("1.0")
+            if is_error:
+                showerror("Error", text)
+            else:
+                showinfo("Info", text)
 
     def clear_console(self) -> None:
         self.console.configure(state=ctk.NORMAL)
@@ -177,13 +190,51 @@ class GetMessages(ctk.CTk):
                       command=self.init_auth_data_menu).pack(pady=(10, 15), anchor=ctk.CENTER)
 
     def init_manage_channels_menu(self) -> None:
-        def add_channel() -> None:
-            channel_name: str = ctk.windows.CTkInputDialog(text="Enter channel name", title="Add channel").get_input()
-            print(channel_name)
-            ...
+        def add_channel(is_user_name: bool = False) -> None:
+            text: str = "Enter channel name" if not is_user_name else "Enter user name"
+            title: str = "Add channel" if not is_user_name else "Set username"
+
+            channel_name: str = ctk.windows.CTkInputDialog(text=text, title=title).get_input()
+
+            if channel_name:
+                user_id: str | None = self.get_id_by_login(channel_name)
+
+                if user_id:
+                    if not is_user_name:
+                        def write_new_channel(data: dict) -> dict:
+                            data["channels"][channel_name] = user_id
+                            return data
+
+                        self.update_data(write_new_channel)
+                        channels_list.insert(ctk.END, channel_name)
+                    else:
+                        def write_user_id(data: dict) -> dict:
+                            data["user_id"] = [channel_name, user_id]
+                            return data
+
+                        self.update_data(write_user_id)
+                        username_label.configure(text=f"Current user: {channel_name}")
+                elif user_id is None:
+                    self.console_print(f"Channel '{channel_name}' not found!", is_error=True)
+                    return
 
         def delete_channel() -> None:
-            ...
+            selected_channel: str | None = channels_list.get()
+
+            if selected_channel is not None and selected_channel:
+                def delete_channel_from_data(data: dict) -> dict:
+                    del data["channels"][selected_channel]
+                    return data
+
+                self.update_data(delete_channel_from_data)
+
+                selected_index = channels_list.curselection()
+
+                channels_list.deselect(selected_index)
+                channels_list.delete(selected_index)
+            else:
+                self.console_print("No channel selected!", is_error=True)
+                return
 
         self.clear_window()
 
@@ -209,8 +260,24 @@ class GetMessages(ctk.CTk):
         ctk.CTkButton(buttons_frame, text="Remove", width=105, command=delete_channel).pack(pady=(10, 0),
                                                                                             anchor=ctk.CENTER)
 
-        channels_list = CTkListbox(main_frame, border_width=2)
-        channels_list.pack(padx=10, fill=ctk.BOTH, expand=True, side=ctk.RIGHT)
+        right_side = ctk.CTkFrame(main_frame, fg_color="transparent")
+        right_side.pack_propagate(False)
+        right_side.pack(side=ctk.RIGHT, fill=ctk.BOTH, expand=True, padx=10)
+
+        channels_list = CTkListbox(right_side, border_width=2)
+        channels_list.pack(fill=ctk.BOTH, expand=True)
+
+        bottom_frame = ctk.CTkFrame(right_side, height=40, fg_color="transparent")
+        bottom_frame.pack_propagate(False)
+        bottom_frame.pack(fill=ctk.X, pady=(10, 0))
+
+        data: dict = self.get_data()
+        text: str = f"Current user: {data["user_id"][0] if data["user_id"] else None}"
+
+        username_label = ctk.CTkLabel(bottom_frame, text=text)
+        username_label.pack(side=ctk.LEFT)
+
+        ctk.CTkButton(bottom_frame, text="Set username", command=lambda: add_channel(True)).pack(side=ctk.RIGHT)
 
         for channel in self.get_data()["channels"].keys():
             channels_list.insert(ctk.END, channel)
@@ -218,13 +285,13 @@ class GetMessages(ctk.CTk):
     def init_auth_data_menu(self) -> None:
         def parse() -> None:
             if self.parse_auth_data(user_data_entry.get("1.0", ctk.END)):
-                showinfo("Info", "Auth data parsed successfully!")
+                self.console_print("Auth data parsed successfully!")
                 self.init_main_menu()
 
         def show_explaining() -> None:
-            showinfo("Info", "You need to go to Twitch, press F12 -> Network, then find the gql "
-                             "request there, right-click -> copy -> Copy as cURL (bash), and then paste this "
-                             "text into the text field.")
+            self.console_print("You need to go to Twitch, press F12 -> Network, then find the gql "
+                               "request there, right-click -> copy -> Copy as cURL (bash), and then paste this "
+                               "text into the text field.")
 
         def paste_text(_=None):
             user_data_entry.insert(ctk.INSERT, self.clipboard_get())
@@ -272,7 +339,7 @@ class GetMessages(ctk.CTk):
 
             for key in wanted_headers:
                 if key not in headers:
-                    showerror("Error", f"Header '{key}' not found in curl text!")
+                    self.console_print(f"Header '{key}' not found in curl text!", is_error=True)
                     return False
 
             def write_auth_data(data: dict) -> dict:
@@ -283,7 +350,7 @@ class GetMessages(ctk.CTk):
 
             return True
         else:
-            showerror("Error", "Curl text is empty!")
+            self.console_print("Curl text is empty!", is_error=True)
             return False
 
     def do_request(self, sha256hash: str, operation_name: str, variables: dict) -> dict | None:
@@ -315,6 +382,28 @@ class GetMessages(ctk.CTk):
                 return None
 
             return json_
+        except Exception as e:
+            self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
+
+            return None
+
+    def get_id_by_login(self, login: str) -> str | None | bool:
+        sha256hash: str = "bf6c594605caa0c63522f690156aa04bd434870bf963deb76668c381d16fcaa5"
+        operation_name: str = "GetUserID"
+        variables: dict = {
+            "login": login,
+            "lookupType": "ACTIVE"
+        }
+
+        response: dict | None = self.do_request(sha256hash, operation_name, variables)
+
+        if response is None:
+            return False
+
+        try:
+            user: dict | None = response["data"]["user"]
+
+            return response["data"]["user"]["id"] if user else None
         except Exception as e:
             self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
             return None
@@ -374,7 +463,7 @@ class GetMessages(ctk.CTk):
         variables: dict = {
             "channelID": data["channels"][selected_channel],
             "cursor": cursor,
-            "senderID": data["user_id"]
+            "senderID": data["user_id"][1]
         }
 
         response: dict | None = self.do_request(sha256hash, operation_name, variables)
@@ -486,7 +575,7 @@ class GetMessages(ctk.CTk):
                 pass
 
         with open("data.json", "w", encoding="UTF-8") as file:
-            json.dump({"channels": {}, "user_data": {}}, file, indent=4)
+            json.dump({"channels": {}, "user_data": {}, "user_id": None}, file, indent=4)
 
 
 if __name__ == '__main__':
