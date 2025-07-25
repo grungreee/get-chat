@@ -22,8 +22,8 @@ class GetMessages(ctk.CTk):
 
         self.selected_channel = ctk.StringVar(value="Select channel")
         self.selected_mode = ctk.StringVar(value="Select mode")
-        self.messages_count = ctk.StringVar(value="Messages count")
-        self.streams_ago = ctk.StringVar(value="... streams ago")
+        self.messages_count: str = ""
+        self.streams_ago: str = ""
         self.with_timecodes = ctk.BooleanVar(value=False)
         self.save_messages_in_file = ctk.BooleanVar(value=False)
 
@@ -60,7 +60,7 @@ class GetMessages(ctk.CTk):
                 threading.Thread(target=self.get_messages).start()
             elif selected_mode == "Last ... messages":
                 try:
-                    messages_count: int = int(self.messages_count.get())
+                    messages_count: int = int(self.messages_count)
                     if messages_count <= 0:
                         self.console_print("Invalid messages count!", is_error=True)
                         return
@@ -70,7 +70,7 @@ class GetMessages(ctk.CTk):
                     self.console_print("Invalid messages count!", is_error=True)
             elif selected_mode == "From ... stream ago":
                 try:
-                    last_stream: tuple = self.get_stream_ago(int(self.streams_ago.get()))
+                    last_stream: tuple = self.get_stream_ago(int(self.streams_ago))
                     if last_stream is not None:
                         threading.Thread(target=self.get_messages, kwargs={"last_stream": last_stream}).start()
                 except ValueError:
@@ -79,6 +79,12 @@ class GetMessages(ctk.CTk):
         def stop() -> None:
             if self.in_process_flag:
                 self.stop_flag = True
+
+        def update_messages_count(_) -> None:
+            self.messages_count = messages_count.get()
+        
+        def update_streams_ago(_) -> None:
+            self.streams_ago = streams_ago.get()
 
         self.clear_window()
 
@@ -104,9 +110,19 @@ class GetMessages(ctk.CTk):
                                         variable=self.selected_mode)
         select_mode.pack(pady=(10, 0))
 
-        ctk.CTkEntry(left_side, textvariable=self.messages_count).pack(pady=(10, 0))
+        messages_count = ctk.CTkEntry(left_side, placeholder_text="Messages count")
+        messages_count.pack(pady=(10, 0))
+        messages_count.bind("<KeyRelease>", update_messages_count)
 
-        ctk.CTkEntry(left_side, textvariable=self.streams_ago).pack(pady=(10, 0))
+        if self.messages_count != "":
+            messages_count.insert(0, self.messages_count)
+
+        streams_ago = ctk.CTkEntry(left_side, placeholder_text="... streams ago")
+        streams_ago.pack(pady=(10, 0))
+        streams_ago.bind("<KeyRelease>", update_streams_ago)
+
+        if self.streams_ago != "":
+            streams_ago.insert(0, self.streams_ago)
 
         ctk.CTkCheckBox(left_side, text="Save messages\nto file",
                         variable=self.save_messages_in_file).pack(pady=(10, 0), anchor=ctk.W, padx=5)
@@ -354,25 +370,25 @@ class GetMessages(ctk.CTk):
             return False
 
     def do_request(self, sha256hash: str, operation_name: str, variables: dict) -> dict | None:
+        payload: dict = {
+            "extensions": {
+                "persistedQuery": {
+                    "sha256Hash": sha256hash,
+                    "version": 1
+                }
+            },
+            "operationName": operation_name,
+            "variables": variables
+        }
+
+        data: dict = self.get_data()
+        headers: dict = data["user_data"]
+
+        if headers == {}:
+            self.console_print("Auth data not found!", is_error=True)
+            return None
+
         try:
-            payload: dict = {
-                "extensions": {
-                    "persistedQuery": {
-                        "sha256Hash": sha256hash,
-                        "version": 1
-                    }
-                },
-                "operationName": operation_name,
-                "variables": variables
-            }
-
-            data: dict = self.get_data()
-            headers: dict = data["user_data"]
-
-            if headers == {}:
-                self.console_print("Auth data not found!", is_error=True)
-                return None
-
             response: rq.Response = rq.post("https://gql.twitch.tv/gql", headers=headers, json=payload)
 
             json_: dict = response.json()
