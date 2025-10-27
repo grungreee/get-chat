@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import queue
 import threading
 import customtkinter as ctk
 import requests as rq
@@ -19,6 +20,11 @@ class GetMessages(ctk.CTk):
         self.loading_bar: ctk.CTkProgressBar | None = None
         self.in_process_flag: bool = False
         self.stop_flag: bool = False
+
+        self.msg_queue: "queue.Queue[str]" = queue.Queue()
+        self.after(100, self._process_message_queue)  # noqa
+
+        self.widgets: list = []
 
         self.selected_channel = ctk.StringVar(value="Select channel")
         self.selected_mode = ctk.StringVar(value="Select mode")
@@ -68,7 +74,7 @@ class GetMessages(ctk.CTk):
                     threading.Thread(target=self.get_messages, kwargs={"max_messages": messages_count}).start()
                 except ValueError:
                     self.console_print("Invalid messages count!", is_error=True)
-            elif selected_mode == "From ... stream ago":
+            elif selected_mode == "From ... stream":
                 try:
                     last_stream: tuple = self.get_stream_ago(int(self.streams_ago))
                     if last_stream is not None:
@@ -80,11 +86,53 @@ class GetMessages(ctk.CTk):
             if self.in_process_flag:
                 self.stop_flag = True
 
-        def update_messages_count(_) -> None:
-            self.messages_count = messages_count.get()
-        
-        def update_streams_ago(_) -> None:
-            self.streams_ago = streams_ago.get()
+        def on_change_option(_=None) -> None:
+            def update_messages_count(_) -> None:
+                self.messages_count = messages_count.get()
+
+            def update_streams_ago(_) -> None:
+                self.streams_ago = streams_ago.get()
+
+            option: str = self.selected_mode.get()
+
+            for widget in self.widgets:
+                if widget.winfo_exists():
+                    widget.destroy()
+
+            self.widgets = []
+
+            if option == "Last ... messages":
+                messages_count = ctk.CTkEntry(left_side, placeholder_text="Messages count")
+                messages_count.pack(pady=(10, 0))
+                messages_count.bind("<KeyRelease>", update_messages_count)
+
+                if self.messages_count != "":
+                    messages_count.insert(0, self.messages_count)
+
+                self.widgets.append(messages_count)
+
+            if option == "From ... stream":
+                streams_ago = ctk.CTkEntry(left_side, placeholder_text="... streams ago")
+                streams_ago.pack(pady=(10, 0))
+                streams_ago.bind("<KeyRelease>", update_streams_ago)
+
+                if self.streams_ago != "":
+                    streams_ago.insert(0, self.streams_ago)
+
+                self.widgets.append(streams_ago)
+
+            if option in ["Last ... messages", "From ... stream", "All messages"]:
+                save_messages = ctk.CTkCheckBox(left_side, text="Save messages\nto file",
+                                                variable=self.save_messages_in_file)
+                save_messages.pack(pady=(10, 0), anchor=ctk.W, padx=5)
+
+                self.widgets.append(save_messages)
+
+            if option == "From ... stream":
+                with_timecodes = ctk.CTkCheckBox(left_side, text="With stream\ntimecodes", variable=self.with_timecodes)
+                with_timecodes.pack(pady=(10, 0), anchor=ctk.W, padx=5)
+
+                self.widgets.append(with_timecodes)
 
         self.clear_window()
 
@@ -106,28 +154,10 @@ class GetMessages(ctk.CTk):
                                            variable=self.selected_channel)
         select_channel.pack(pady=(10, 0))
 
-        select_mode = ctk.CTkOptionMenu(left_side, values=["All messages", "Last ... messages", "From ... stream ago"],
-                                        variable=self.selected_mode)
+        select_mode = ctk.CTkOptionMenu(left_side, values=["All messages", "Last ... messages", "From ... stream"],
+                                        variable=self.selected_mode, command=on_change_option)
         select_mode.pack(pady=(10, 0))
-
-        messages_count = ctk.CTkEntry(left_side, placeholder_text="Messages count")
-        messages_count.pack(pady=(10, 0))
-        messages_count.bind("<KeyRelease>", update_messages_count)
-
-        if self.messages_count != "":
-            messages_count.insert(0, self.messages_count)
-
-        streams_ago = ctk.CTkEntry(left_side, placeholder_text="... streams ago")
-        streams_ago.pack(pady=(10, 0))
-        streams_ago.bind("<KeyRelease>", update_streams_ago)
-
-        if self.streams_ago != "":
-            streams_ago.insert(0, self.streams_ago)
-
-        ctk.CTkCheckBox(left_side, text="Save messages\nto file",
-                        variable=self.save_messages_in_file).pack(pady=(10, 0), anchor=ctk.W, padx=5)
-        ctk.CTkCheckBox(left_side, text="With stream\ntimecodes",
-                        variable=self.with_timecodes).pack(pady=(10, 0), anchor=ctk.W, padx=5)
+        on_change_option()
 
         self.confirm_button = ctk.CTkButton(left_side, text="Confirm", font=("times new roman", 16, "bold"),
                                             fg_color="#393939", border_color="#52514e", border_width=1,
@@ -160,6 +190,15 @@ class GetMessages(ctk.CTk):
                       width=50, command=stop).pack(side=ctk.LEFT, padx=5)
         ctk.CTkButton(console_buttons_frame, text="Clear", font=("times new roman", 16, "bold"),
                       width=50, command=self.clear_console).pack(side=ctk.LEFT, padx=5)
+
+    def _process_message_queue(self) -> None:
+        try:
+            for _ in range(50):
+                msg = self.msg_queue.get_nowait()
+                self.console_print(msg)
+        except queue.Empty:
+            pass
+        self.after(5, self._process_message_queue)  # noqa
 
     def console_print(self, text: str, is_error: bool = False) -> None:
         if self.console.winfo_exists():
@@ -337,7 +376,7 @@ class GetMessages(ctk.CTk):
 
     def parse_auth_data(self, curl_text: str) -> bool:
         if curl_text != "\n":
-            wanted_headers: dict = {
+            wanted_headers: set[str] = {
                 "x-device-id",
                 "authorization",
                 "client-version",
@@ -424,7 +463,7 @@ class GetMessages(ctk.CTk):
             self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
             return None
 
-    def get_stream_ago(self, stream_ago: int) -> str | None:
+    def get_stream_ago(self, stream_ago: int) -> tuple[str, int] | None:
         sha256hash: str = "acea7539a293dfd30f0b0b81a263134bb5d9a7175592e14ac3f7c77b192de416"
         operation_name: str = "FilterableVideoTower_Videos"
         variables: dict = {
@@ -492,7 +531,7 @@ class GetMessages(ctk.CTk):
             messages: dict = response["data"]["logs"]["messages"]
             edges: dict = messages["edges"]
 
-            for edge in edges:
+            for i, edge in enumerate(edges):
                 if self.stop_flag:
                     stop(with_save=True)
                     return
@@ -524,12 +563,12 @@ class GetMessages(ctk.CTk):
                         return
 
                 redacted_date: str = (message_date_obj + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
-                sender: str = node["sender"]
+                sender: dict = node["sender"]
                 message: str = node["content"]["text"]
 
                 output_message: str = stream_timecode + f"({redacted_date}) {sender['displayName']}: {message}"
 
-                self.console_print(output_message)
+                self.msg_queue.put(output_message)
                 all_messages.append(output_message + "\n")
 
                 messages_count += 1
