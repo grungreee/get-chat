@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import re
 import queue
 import threading
@@ -234,15 +235,14 @@ class GetMessages(ctk.CTk):
         frame.pack_propagate(False)
         frame.pack(fill=ctk.BOTH, expand=True, padx=10, pady=(0, 10))
 
-        settings_frame = ctk.CTkFrame(frame, height=95)
-        settings_frame.pack_propagate(False)
+        settings_frame = ctk.CTkFrame(frame)
         settings_frame.place(relx=0.5, rely=0.5, anchor=ctk.CENTER)
 
         ctk.CTkButton(settings_frame, text="Manage channels",
-                      command=self.init_manage_channels_menu).pack(pady=(15, 0), anchor=ctk.CENTER)
+                      command=self.init_manage_channels_menu).pack(pady=(20, 0), padx=35, anchor=ctk.CENTER)
 
         ctk.CTkButton(settings_frame, text="Enter auth data",
-                      command=self.init_auth_data_menu).pack(pady=(10, 15), anchor=ctk.CENTER)
+                      command=self.init_auth_data_menu).pack(pady=(10, 20), padx=35, anchor=ctk.CENTER)
 
     def init_manage_channels_menu(self) -> None:
         def add_channel(is_user_name: bool = False) -> None:
@@ -340,17 +340,20 @@ class GetMessages(ctk.CTk):
     def init_auth_data_menu(self) -> None:
         def parse() -> None:
             if self.parse_auth_data(user_data_entry.get("1.0", ctk.END)):
-                self.console_print("Auth data parsed successfully!")
                 self.init_main_menu()
+                self.console_print("Auth data parsed successfully!")
 
         def show_explaining() -> None:
             self.console_print("You need to go to Twitch, press F12 -> Network, then find the gql "
                                "request there, right-click -> copy -> Copy as cURL (bash), and then paste this "
                                "text into the text field.")
 
-        def paste_text(_=None):
-            user_data_entry.insert(ctk.INSERT, self.clipboard_get())
-            return "break"
+        def on_ctrl_key(event) -> str | None:
+            if event.state & 0x4 and event.keycode == 86:
+                user_data_entry.insert(ctk.INSERT, self.clipboard_get())
+                return "break"
+
+            return None
 
         self.clear_window()
 
@@ -370,7 +373,7 @@ class GetMessages(ctk.CTk):
         user_data_entry = ctk.CTkTextbox(self)
         user_data_entry.pack(padx=10, fill=ctk.BOTH, expand=True)
 
-        user_data_entry.bind("<Control-v>", paste_text)
+        user_data_entry.bind("<KeyPress>", on_ctrl_key, add="+")
 
         ctk.CTkButton(self, text="Parse", command=parse).pack(padx=10, pady=10)
 
@@ -537,14 +540,16 @@ class GetMessages(ctk.CTk):
                     return
 
                 node: dict = edge["node"]
-                message_date_obj = datetime.fromisoformat(node["sentAt"].replace("Z", "+03:00"))
+                message_date_obj_utc = datetime.fromisoformat(node["sentAt"].replace("Z", "+00:00"))
+                message_date_obj = message_date_obj_utc.astimezone()
 
                 stream_timecode: str = ""
 
                 if last_stream is not None:
                     stream_date, stream_length = last_stream
 
-                    last_stream_date_obj = datetime.fromisoformat(stream_date.replace("Z", "+03:00"))
+                    last_stream_date_obj_utc = datetime.fromisoformat(stream_date.replace("Z", "+00:00"))
+                    last_stream_date_obj = last_stream_date_obj_utc.astimezone()
                     end_stream_date_obj = last_stream_date_obj + timedelta(seconds=stream_length)
 
                     if end_stream_date_obj < message_date_obj:
@@ -562,14 +567,16 @@ class GetMessages(ctk.CTk):
                         stop(with_save=True)
                         return
 
-                redacted_date: str = (message_date_obj + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M:%S")
+                redacted_date_utc: str = message_date_obj_utc.strftime("%d.%m.%Y %H:%M:%S")
+                redacted_date: str = message_date_obj.strftime("%d.%m.%Y %H:%M:%S")
                 sender: dict = node["sender"]
-                message: str = node["content"]["text"]
+                message_text: str = node["content"]["text"]
 
-                output_message: str = stream_timecode + f"({redacted_date}) {sender['displayName']}: {message}"
+                file_message: str = stream_timecode + f"({redacted_date_utc}) {sender['displayName']}: {message_text}\n"
+                display_message: str = stream_timecode + f"({redacted_date}) {sender['displayName']}: {message_text}"
 
-                self.msg_queue.put(output_message)
-                all_messages.append(output_message + "\n")
+                all_messages.append(file_message)
+                self.msg_queue.put(display_message)
 
                 messages_count += 1
 
@@ -633,5 +640,12 @@ class GetMessages(ctk.CTk):
             json.dump({"channels": {}, "user_data": {}, "user_id": None}, file, indent=4)
 
 
-if __name__ == '__main__':
+def main() -> None:
+    if getattr(sys, "frozen", False):
+        os.chdir(os.path.dirname(sys.argv[0]))
+
     GetMessages().mainloop()
+
+
+if __name__ == '__main__':
+    main()
