@@ -206,12 +206,6 @@ class GetMessages(ctk.CTk):
         ctk.CTkButton(console_buttons_frame, text="Clear", font=("times new roman", 16, "bold"),
                       width=50, command=self.clear_console).pack(side=ctk.LEFT, padx=5)
 
-        # ctk.CTkButton(console_buttons_frame, text="Search", font=("times new roman", 13, "bold"),
-        #               width=50,).pack(side=ctk.RIGHT, padx=5)
-        #
-        # self.search_entry = ctk.CTkEntry(console_buttons_frame, placeholder_text="Search messages", width=170)
-        # self.search_entry.pack(side=ctk.RIGHT, padx=5)
-
     def _process_messages_queue(self) -> None:
         while True:
             try:
@@ -585,10 +579,10 @@ class GetMessages(ctk.CTk):
 
                         if self.with_timecodes.get():
                             stream_timecode_obj = datetime(1, 1, 1) + timedelta(seconds=seconds_diff)
-
                             stream_timecode = f"[{stream_timecode_obj.strftime('%H:%M:%S')}] "
 
-                        self.loading_bar.set((stream_length - seconds_diff) / stream_length)
+                        self.after(0, lambda: self.loading_bar.set((stream_length - seconds_diff) /
+                                                                   stream_length))  # noqa
                     else:
                         stop_flag = True
                         break
@@ -608,12 +602,13 @@ class GetMessages(ctk.CTk):
 
                 messages_count += 1
 
+                if max_messages != 0:
+                    self.after(0, lambda: self.loading_bar.set(messages_count / max_messages))  # noqa
+
                 if messages_count >= max_messages != 0:
                     stop_flag = True
                     break
 
-            if max_messages != 0:
-                self.after(0, lambda: self.loading_bar.set(messages_count / max_messages))  # noqa
             self.after(0, lambda: self.console_print(messages_queue))  # noqa
 
             if messages["pageInfo"]["hasNextPage"] and not stop_flag:
