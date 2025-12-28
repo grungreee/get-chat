@@ -588,7 +588,8 @@ class GetMessages(ctk.CTk):
                     return
 
             if messages["pageInfo"]["hasNextPage"]:
-                self.get_messages(edges[-1]["cursor"], messages_count, max_messages, last_stream, all_messages)
+                self.after(0, lambda: self.get_messages(edges[-1]["cursor"],
+                                                        messages_count, max_messages, last_stream, all_messages))
             else:
                 stop(with_save=True)
         except Exception as e:
