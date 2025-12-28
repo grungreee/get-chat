@@ -4,12 +4,25 @@ import sys
 import re
 import queue
 import threading
+import time
+
 import customtkinter as ctk
 import requests as rq
 from datetime import datetime, timedelta
 from tkinter.messagebox import showerror, showinfo
 from CTkListbox import CTkListbox
-from typing import Callable
+from typing import Callable, Literal
+
+
+class Timer:
+    def __enter__(self):
+        self.start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args):
+        self.end = time.perf_counter()
+        self.elapsed = self.end - self.start
+        print(f"{self.elapsed:.6f} сек")
 
 
 class GetMessages(ctk.CTk):
@@ -22,8 +35,8 @@ class GetMessages(ctk.CTk):
         self.in_process_flag: bool = False
         self.stop_flag: bool = False
 
-        self.msg_queue: "queue.Queue[str]" = queue.Queue()
-        self.after(100, self._process_message_queue)  # noqa
+        self.msg_queue: "queue.Queue[tuple]" = queue.Queue()
+        threading.Thread(target=self._process_messages_queue, daemon=True).start()
 
         self.widgets: list = []
 
@@ -47,17 +60,17 @@ class GetMessages(ctk.CTk):
             data: dict = self.get_data()
 
             if selected_mode == "Select mode":
-                self.console_print("Mode not selected!", is_error=True)
+                self.console_print("Mode not selected!", type_="error")
                 stop()
                 return
 
             if selected_channel == "Select channel":
-                self.console_print("Channel not selected!", is_error=True)
+                self.console_print("Channel not selected!", type_="error")
                 stop()
                 return
 
             if data["user_id"] is None:
-                self.console_print("User id not found!", is_error=True)
+                self.console_print("User id not found!", type_="error")
                 stop()
                 return
 
@@ -69,19 +82,19 @@ class GetMessages(ctk.CTk):
                 try:
                     messages_count: int = int(self.messages_count)
                     if messages_count <= 0:
-                        self.console_print("Invalid messages count!", is_error=True)
+                        self.console_print("Invalid messages count!", type_="error")
                         return
 
                     threading.Thread(target=self.get_messages, kwargs={"max_messages": messages_count}).start()
                 except ValueError:
-                    self.console_print("Invalid messages count!", is_error=True)
+                    self.console_print("Invalid messages count!", type_="error")
             elif selected_mode == "From ... stream":
                 try:
                     last_stream: tuple = self.get_stream_ago(int(self.streams_ago))
                     if last_stream is not None:
                         threading.Thread(target=self.get_messages, kwargs={"last_stream": last_stream}).start()
                 except ValueError:
-                    self.console_print("Invalid streams ago!", is_error=True)
+                    self.console_print("Invalid streams ago!", type_="error")
 
         def stop() -> None:
             if self.in_process_flag:
@@ -181,6 +194,7 @@ class GetMessages(ctk.CTk):
 
         self.console = ctk.CTkTextbox(console_frame, state=ctk.DISABLED)
         self.console.tag_config("error", foreground="#bf2a2f")
+        self.console.tag_config("success", foreground="#24bf24")
         self.console.pack(fill=ctk.BOTH, expand=True, side=ctk.BOTTOM)
 
         console_buttons_frame = ctk.CTkFrame(right_side, height=40)
@@ -192,28 +206,37 @@ class GetMessages(ctk.CTk):
         ctk.CTkButton(console_buttons_frame, text="Clear", font=("times new roman", 16, "bold"),
                       width=50, command=self.clear_console).pack(side=ctk.LEFT, padx=5)
 
-    def _process_message_queue(self) -> None:
-        try:
-            for _ in range(50):
-                msg = self.msg_queue.get_nowait()
-                self.console_print(msg)
-        except queue.Empty:
-            pass
-        self.after(5, self._process_message_queue)  # noqa
+        # ctk.CTkButton(console_buttons_frame, text="Search", font=("times new roman", 13, "bold"),
+        #               width=50,).pack(side=ctk.RIGHT, padx=5)
+        #
+        # self.search_entry = ctk.CTkEntry(console_buttons_frame, placeholder_text="Search messages", width=170)
+        # self.search_entry.pack(side=ctk.RIGHT, padx=5)
 
-    def console_print(self, text: str, is_error: bool = False) -> None:
+    def _process_messages_queue(self) -> None:
+        while True:
+            try:
+                args: tuple = self.msg_queue.get_nowait()
+                self.get_messages(*args)
+            except queue.Empty:
+                pass
+
+            time.sleep(0.05)
+
+    def console_print(self, text: str, type_: Literal["error", "success"] = None) -> None:
         if self.console.winfo_exists():
             self.console.configure(state=ctk.NORMAL)
 
-            if is_error:
+            if type_ == "error":
                 self.console.insert("1.0", text + "\n", "error")
+            elif type_ == "success":
+                self.console.insert("1.0", text + "\n", "success")
             else:
                 self.console.insert("1.0", text + "\n")
 
             self.console.configure(state=ctk.DISABLED)
             self.console.see("1.0")
         else:
-            if is_error:
+            if type_ == "error":
                 showerror("Error", text)
             else:
                 showinfo("Info", text)
@@ -270,7 +293,7 @@ class GetMessages(ctk.CTk):
                         self.update_data(write_user_id)
                         username_label.configure(text=f"Current user: {channel_name}")
                 elif user_id is None:
-                    self.console_print(f"Channel '{channel_name}' not found!", is_error=True)
+                    self.console_print(f"Channel '{channel_name}' not found!", type_="error")
                     return
 
         def delete_channel() -> None:
@@ -288,7 +311,7 @@ class GetMessages(ctk.CTk):
                 channels_list.deselect(selected_index)
                 channels_list.delete(selected_index)
             else:
-                self.console_print("No channel selected!", is_error=True)
+                self.console_print("No channel selected!", type_="error")
                 return
 
         self.clear_window()
@@ -341,7 +364,7 @@ class GetMessages(ctk.CTk):
         def parse() -> None:
             if self.parse_auth_data(user_data_entry.get("1.0", ctk.END)):
                 self.init_main_menu()
-                self.console_print("Auth data parsed successfully!")
+                self.console_print("Auth data parsed successfully!", type_="success")
 
         def show_explaining() -> None:
             self.console_print("You need to go to Twitch, press F12 -> Network, then find the gql "
@@ -397,7 +420,7 @@ class GetMessages(ctk.CTk):
 
             for key in wanted_headers:
                 if key not in headers:
-                    self.console_print(f"Header '{key}' not found in curl text!", is_error=True)
+                    self.console_print(f"Header '{key}' not found in curl text!", type_="error")
                     return False
 
             def write_auth_data(data: dict) -> dict:
@@ -408,7 +431,7 @@ class GetMessages(ctk.CTk):
 
             return True
         else:
-            self.console_print("Curl text is empty!", is_error=True)
+            self.console_print("Curl text is empty!", type_="error")
             return False
 
     def do_request(self, sha256hash: str, operation_name: str, variables: dict) -> dict | None:
@@ -427,7 +450,7 @@ class GetMessages(ctk.CTk):
         headers: dict = data["user_data"]
 
         if headers == {}:
-            self.console_print("Auth data not found!", is_error=True)
+            self.console_print("Auth data not found!", type_="error")
             return None
 
         try:
@@ -436,12 +459,12 @@ class GetMessages(ctk.CTk):
             json_: dict = response.json()
 
             if "error" in json_ or ("errors" in json_ and json_["errors"][0]["message"] == "failed integrity check"):
-                self.console_print("Failed integrity check! Auth data is probably out of date.", is_error=True)
+                self.console_print("Failed integrity check! Auth data is probably out of date.", type_="error")
                 return None
 
             return json_
         except Exception as e:
-            self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
+            self.console_print(f"An error occurred: {type(e)} ({str(e)})", type_="error")
 
             return None
 
@@ -463,7 +486,7 @@ class GetMessages(ctk.CTk):
 
             return response["data"]["user"]["id"] if user else None
         except Exception as e:
-            self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
+            self.console_print(f"An error occurred: {type(e)} ({str(e)})", type_="error")
             return None
 
     def get_stream_ago(self, stream_ago: int) -> tuple[str, int] | None:
@@ -487,7 +510,7 @@ class GetMessages(ctk.CTk):
             stream_length: int = node["lengthSeconds"]
             return last_stream_date, stream_length
         except Exception as e:
-            self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
+            self.console_print(f"An error occurred: {type(e)} ({str(e)})", type_="error")
             return None
 
     def get_messages(self, cursor: str = "", messages_count: int = 0, max_messages: int = 0,
@@ -530,6 +553,9 @@ class GetMessages(ctk.CTk):
             stop()
             return
 
+        messages_queue: str = ""
+        stop_flag: bool = False
+
         try:
             messages: dict = response["data"]["logs"]["messages"]
             edges: dict = messages["edges"]
@@ -564,36 +590,38 @@ class GetMessages(ctk.CTk):
 
                         self.loading_bar.set((stream_length - seconds_diff) / stream_length)
                     else:
-                        stop(with_save=True)
-                        return
+                        stop_flag = True
+                        break
 
                 redacted_date_utc: str = message_date_obj_utc.strftime("%d.%m.%Y %H:%M:%S")
                 redacted_date: str = message_date_obj.strftime("%d.%m.%Y %H:%M:%S")
                 sender: dict = node["sender"]
                 message_text: str = node["content"]["text"]
 
-                file_message: str = stream_timecode + f"({redacted_date_utc}) {sender['displayName']}: {message_text}\n"
-                display_message: str = stream_timecode + f"({redacted_date}) {sender['displayName']}: {message_text}"
+                main_message: str = f"{sender['displayName']}: {message_text}"
+
+                file_message: str = stream_timecode + f"({redacted_date_utc}) {main_message}\n"
+                display_message: str = stream_timecode + f"({redacted_date}) {main_message}"
 
                 all_messages.append(file_message)
-                self.msg_queue.put(display_message)
+                messages_queue = f"{display_message}\n{messages_queue}"
 
                 messages_count += 1
 
-                if max_messages != 0:
-                    self.loading_bar.set(messages_count / max_messages)
-
                 if messages_count >= max_messages != 0:
-                    stop(with_save=True)
-                    return
+                    stop_flag = True
+                    break
 
-            if messages["pageInfo"]["hasNextPage"]:
-                self.after(0, lambda: self.get_messages(edges[-1]["cursor"],
-                                                        messages_count, max_messages, last_stream, all_messages))
+            if max_messages != 0:
+                self.after(0, lambda: self.loading_bar.set(messages_count / max_messages))  # noqa
+            self.after(0, lambda: self.console_print(messages_queue))  # noqa
+
+            if messages["pageInfo"]["hasNextPage"] and not stop_flag:
+                self.msg_queue.put((edges[-1]["cursor"], messages_count, max_messages, last_stream, all_messages))
             else:
                 stop(with_save=True)
         except Exception as e:
-            self.console_print(f"An error occurred: {type(e)} ({str(e)})", is_error=True)
+            self.console_print(f"An error occurred: {type(e)} ({str(e)})", type_="error")
             stop()
             return
 
